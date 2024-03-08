@@ -13,7 +13,7 @@ gv.obstacle_radius = [0.5,3]
 gv.length_start = 2 * gv.obstacle_radius[1]
 gv.length = 10 + 2 * gv.length_start
 gv.width = 10
-gv.smooth_poly_n = 3
+gv.smooth_poly_n = 5
 
 jupyter_figsize = 0.3
 
@@ -46,7 +46,8 @@ axes.plot(y_coord,x_coord,'orange')
 # fig
 print('finished!')
 
-optimized_coeffs, filter_line_coord = smoothpath.start(result)
+sp = smoothpath.SmoothPath(result)
+optimized_coeffs, filter_line_coord = sp.start()
 
 print(optimized_coeffs)
 
