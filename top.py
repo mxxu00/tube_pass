@@ -7,13 +7,13 @@ import astar
 import astarclass
 import smoothpath
 
-gv.obstacle_number = 8
-gv.obstacle_safedist = 0.5
-gv.obstacle_radius = [0.5,3]
+gv.obstacle_number = 30
+gv.obstacle_safedist = 0.1
+gv.obstacle_radius = [0.1,1]
 gv.length_start = 2 * gv.obstacle_radius[1]
 gv.length = 10 + 2 * gv.length_start
 gv.width = 10
-gv.smooth_poly_n = 5
+gv.smooth_poly_n = 3
 
 jupyter_figsize = 0.3
 

@@ -13,6 +13,6 @@ obstacle_safedist = 0
 obstacle_radius = 0
 length_start = 0
 smooth_poly_n = 3
-tubegen_poly_n = 0
+tubegen_poly_n = 5
 lambda_max = 0
 sim_step_length = 10

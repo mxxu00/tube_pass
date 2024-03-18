@@ -5,8 +5,7 @@ import math
 import globalvar as gv
 import pickle
 
-poly_n = 0
-line_number = 0
+
 # 定义目标函数
 def objective_function(coeffs):
     # 将系数重新整形为形状为(line_number, poly_n+1)的矩阵
@@ -138,7 +137,7 @@ def get_derivative(coeffs, order):
         derivative.append(np.polyder(coeffs_matrix[i], order))
     return derivative    
 
-def gen_tube(coeffs, coord, derivative, radius):
+def tube_gen(coeffs, coord, derivative, radius):
     coeffs_matrix = np.reshape(coeffs, (line_number * 2, poly_n+1))
     derivative_matrix = np.reshape(derivative, (line_number * 2, poly_n))
     tube = np.zeros((line_number, gv.sim_step_length, 2, 2)) # 分别对应 点的位置、θ=0 or pi、x和y值
@@ -194,7 +193,7 @@ def main():
     # lambda_min_set = find_lambda_min(myobstacle, mycoeffs_gamma, mycoord)
     # print(lambda_min_set)
     derivative_set = get_derivative(mycoeffs_gamma, 1)
-    tube_set = gen_tube(mycoeffs_gamma, mycoord, derivative_set, 1)
+    tube_set = tube_gen(mycoeffs_gamma, mycoord, derivative_set, 1)
 
     
     # 画图调试
