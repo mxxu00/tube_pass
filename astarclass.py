@@ -114,7 +114,7 @@ class Node(object):
                     i.g = self.g
 
 
-class AstarMap(object):
+class Map(object):
     def __init__(self, data, startx, starty, endx, endy):
         self.data = data
         self.startx = startx
