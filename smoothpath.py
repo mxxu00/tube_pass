@@ -163,11 +163,7 @@ class SmoothPath:
         self.optimized_coeffs = np.append(optimized_coeffs_x, optimized_coeffs_y, axis = 1)
         self.optimized_coeffs = np.reshape(self.optimized_coeffs, (self.line_number * 2, self.poly_n + 1))
 
-        # 绘制最优曲线 
-        # plt.plot(initial_coord[:, 0], initial_coord[:, 1], label='Initial',color='orange')
-        # plot_curve(optimized_coeffs, self.filter_line_coord)
-        # print(self.optimized_coeffs)
-        return self.optimized_coeffs, self.filter_line_coord
+        return optimized_coeffs_x, optimized_coeffs_y, self.filter_line_coord
     
     def plot(self):
         plt.plot(self.initial_coord[:, 0], self.initial_coord[:, 1], label='Initial',color='orange')

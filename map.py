@@ -17,8 +17,9 @@ def init(axes):
     # 障碍物生成
     myobstacle = []
     for i in range(gv.obstacle_number):
-        myobstacle.append(Obstacle(random.random()*gv.width + gv.length_start,
-                          random.random()*gv.width, random.uniform(gv.obstacle_radius[0], gv.obstacle_radius[1])))
+        myobstacle.append(Obstacle(random.random() * gv.width + gv.length_start,
+                                    random.random() * (gv.width + 100 * 2) - 100,
+                                    random.uniform(gv.obstacle_radius[0], gv.obstacle_radius[1])))
 
     for i in range(gv.obstacle_number):
         circ = pc.Circle((myobstacle[i].x, myobstacle[i].y), myobstacle[i].r)
@@ -35,31 +36,32 @@ def init(axes):
     for i in range(gv.obstacle_number):
         closest_x = round(myobstacle[i].x)
         closest_y = round(myobstacle[i].y)
-        leastradius = math.ceil(myobstacle[i].r) + gv.obstacle_safedist
-        # j <-> x <-> length    k <-> y <-> width
-        # 这里要注意 坐标系的变换 计算时以左上角为(0,0) 但实际上画图时左下角为(0,0) 所以写入到mymap之前要进行映射
-        for j in range(closest_x - leastradius, closest_x + leastradius):
-            for k in range(closest_y - leastradius, closest_y + leastradius):
-                if(j >= 0 and j <= gv.length  and k >= 0 and k <= gv.width and occup_map[j][k] != 1):
-                    p1 = np.array((j, k))  # 此时还位于matplotlib坐标系
+        leastradius = math.ceil(myobstacle[i].r) + gv.obstacle_safedist_occup
+        # j <-> x <-> length  k <-> y <-> width
+        for j in range(max(closest_x - leastradius, 0), min(closest_x + leastradius, gv.length + 1)):
+            for k in range(max(closest_y - leastradius, 0), min(closest_y + leastradius, gv.width + 1)):
+                if(occup_map[j][k] != 1):
+                    p1 = np.array((j, k))
                     p2 = np.array((myobstacle[i].x, myobstacle[i].y))
                     dist = np.sqrt(np.sum((p1 - p2)**2))
-                    # print(dist)
-                    if(dist < myobstacle[i].r + gv.obstacle_safedist):
+                    if(dist < myobstacle[i].r + gv.obstacle_safedist_occup):
                         occup_map[j][k] = 1
                         # axes.scatter(j, k, color='r', marker='x')
     print('occup_map init finished')    
 
     # Astar地图生成
-    w1 = int(gv.width / gv.astarmap_scale)
     l1 = int(gv.length / gv.astarmap_scale)
+    w1 = int(gv.width / gv.astarmap_scale)
     astar_map = np.zeros((l1 + 1,w1 + 1))
-    for i in range(l1):
-        for j in range(w1):
-            # print(i * gv.astarmap_scale, j * gv.astarmap_scale, occup_map[i * gv.astarmap_scale][j * gv.astarmap_scale])
-            if(occup_map[i * gv.astarmap_scale][j * gv.astarmap_scale] == 1):
-                astar_map[i][j] = 1
-                axes.scatter(i * gv.astarmap_scale, j * gv.astarmap_scale, color='r', marker='x')
+    for i in range(l1 + 1): 
+        for j in range(w1 + 1):
+            for k in range(gv.obstacle_number):
+                p1 = np.array((i * gv.astarmap_scale, j * gv.astarmap_scale))
+                p2 = np.array((myobstacle[k].x, myobstacle[k].y))
+                dist = np.sqrt(np.sum((p1 - p2)**2))
+                if(dist < myobstacle[k].r + gv.obstacle_safedist_astar):
+                    astar_map[i][j] = 1
+                    axes.scatter(i * gv.astarmap_scale, j * gv.astarmap_scale, color='r', marker='x')
 
     print('astar_map init finished')    
 
