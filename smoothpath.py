@@ -6,31 +6,22 @@ import globalvar as gv
 import time
 import common_compute as cc
 import qpsolvers
+from scipy import sparse
 
 class SmoothPath:
     def __init__(self,coord_input):
-        self.filter_line_coord = 1
         self.initial_coord = np.array(coord_input)
-        self.line_number = 0
+        self.filter_line_coord = self._coord_preprocess(self.initial_coord)
+        self.line_number = len(self.filter_line_coord) - 1
+        
         self.optimized_coeffs = 0
-        self.poly_n = 0 
-        self.filter_line_coord = 0
-        self.initial_coeffs = 0
+        self.poly_n = gv.smooth_poly_n
         self.q_all = 0
         self.a_eq = 0
         self.b_eq = 0
 
-    def _objective_function(self, coeffs):
-        objective = (coeffs @ self.q_all) @ coeffs
-
-        return objective     
-
-    def _constraint_function(self, coeffs):
-        constraints =  self.a_eq @ coeffs - self.b_eq
-        return constraints
-
     # 坐标预处理 只计算长度 路径点全保留
-    def coord_preprocess(self, coord):
+    def _coord_preprocess(self, coord):
         total_length = 0
         filter_coord = []
         for i in range(len(coord) - 1):
@@ -85,8 +76,8 @@ class SmoothPath:
         plt.axis('equal')
         plt.show()
 
-    def construct_constraints(self, ts, v0, a0, ve, ae, waypts):
-        n_coef = gv.smooth_poly_n + 1
+    def _construct_constraints(self, ts, v0, a0, ve, ae, waypts):
+        n_coef = self.poly_n + 1
         Aeq = np.zeros((4 * self.line_number + 2, n_coef * self.line_number))
         beq = np.zeros(4 * self.line_number + 2)
 
@@ -94,26 +85,26 @@ class SmoothPath:
         pe = waypts[-1]  # 终点位置
 
         # 初始端和末端的时间、加速度、速度、位置的约束 (6 equations)
-        Aeq[0:3, 0:n_coef] = [cc.calc_tvec(ts[0], gv.smooth_poly_n, 0),
-                            cc.calc_tvec(ts[0], gv.smooth_poly_n, 1),
-                            cc.calc_tvec(ts[0], gv.smooth_poly_n, 2)]
-        Aeq[3:6, n_coef * (self.line_number - 1):n_coef * self.line_number] = [cc.calc_tvec(ts[-1], gv.smooth_poly_n, 0),
-                                                        cc.calc_tvec(ts[-1], gv.smooth_poly_n, 1),
-                                                        cc.calc_tvec(ts[-1], gv.smooth_poly_n, 2)]
+        Aeq[0:3, 0:n_coef] = [cc.calc_tvec(ts[0], self.poly_n, 0),
+                            cc.calc_tvec(ts[0], self.poly_n, 1),
+                            cc.calc_tvec(ts[0], self.poly_n, 2)]
+        Aeq[3:6, n_coef * (self.line_number - 1):n_coef * self.line_number] = [cc.calc_tvec(ts[-1], self.poly_n, 0),
+                                                        cc.calc_tvec(ts[-1], self.poly_n, 1),
+                                                        cc.calc_tvec(ts[-1], self.poly_n, 2)]
         beq[0:6] = [p0, v0, a0, pe, ve, ae]
 
         # 中间点位置约束 (self.line_number-1 equations)
         neq = 6 # 从第7个约束开始
         for i in range(self.line_number - 1):
-            Aeq[neq, n_coef * i:n_coef * (i + 1)] = cc.calc_tvec(ts[i + 1], gv.smooth_poly_n, 0)
+            Aeq[neq, n_coef * i:n_coef * (i + 1)] = cc.calc_tvec(ts[i + 1], self.poly_n, 0)
             beq[neq] = waypts[i + 1]
             neq += 1
 
         # 连续约束 ((self.line_number-1)*3 equations)
         for i in range(self.line_number - 1):
-            tvec_p = cc.calc_tvec(ts[i + 1], gv.smooth_poly_n, 0)
-            tvec_v = cc.calc_tvec(ts[i + 1], gv.smooth_poly_n, 1)
-            tvec_a = cc.calc_tvec(ts[i + 1], gv.smooth_poly_n, 2)
+            tvec_p = cc.calc_tvec(ts[i + 1], self.poly_n, 0)
+            tvec_v = cc.calc_tvec(ts[i + 1], self.poly_n, 1)
+            tvec_a = cc.calc_tvec(ts[i + 1], self.poly_n, 2)
 
             Aeq[neq, n_coef * i:n_coef * (i + 1)] = tvec_p
             Aeq[neq, n_coef * (i + 1):n_coef * (i + 2)] = -tvec_p
@@ -130,12 +121,7 @@ class SmoothPath:
         return Aeq, beq
 
     def start(self):
-        self.poly_n = gv.smooth_poly_n
-
         # 预处理线段 根据路径长度增加参数t （时间）
-        self.filter_line_coord = self.coord_preprocess(self.initial_coord)
-        self.line_number = len(self.filter_line_coord) - 1
-
         v0 = (self.filter_line_coord[1, :2] - self.filter_line_coord[0, :2]) / np.linalg.norm(self.filter_line_coord[1, :2] - self.filter_line_coord[0, :2])
         ve = (self.filter_line_coord[-1, :2] - self.filter_line_coord[-2, :2]) / np.linalg.norm(self.filter_line_coord[-1, :2] - self.filter_line_coord[-2, :2])
         
@@ -144,19 +130,25 @@ class SmoothPath:
 
         t1 = time.time()
         # 进行优化        
-        self.q_all = cc.compute_qall(gv.smooth_poly_n, self.line_number, 2, self.filter_line_coord[:,2])
-        self.b_all = np.zeros(self.line_number * (gv.smooth_poly_n + 1))
+        q_all = cc.compute_qall(self.poly_n, self.line_number, 2, self.filter_line_coord[:,2])
+        b_all = np.zeros(self.line_number * (self.poly_n + 1))
 
-        self.a_eq, self.b_eq = self.construct_constraints(self.filter_line_coord[:,2], v0[0], 0, ve[0], 0, self.filter_line_coord[:,0])  
-        optimized_coeffs_x = qpsolvers.solve_qp(self.q_all, np.array(initial_coeffs_x), None, None, self.a_eq, self.b_eq, solver = 'clarabel')
+        # a_eq, b_eq = self._construct_constraints(self.filter_line_coord[:,2], v0[0], 0, ve[0], 0, self.filter_line_coord[:,0])  
+        # optimized_coeffs_x = qpsolvers.solve_qp(q_all, b_all, None, None, a_eq, b_eq, solver = 'quadprog')
         
-        self.a_eq, self.b_eq = self.construct_constraints(self.filter_line_coord[:,2], v0[1], 0, ve[1], 0, self.filter_line_coord[:,1])
-        optimized_coeffs_y = qpsolvers.solve_qp(self.q_all, np.array(initial_coeffs_y), None, None, self.a_eq, self.b_eq, solver = 'clarabel')
+        # a_eq, b_eq = self._construct_constraints(self.filter_line_coord[:,2], v0[1], 0, ve[1], 0, self.filter_line_coord[:,1])
+        # optimized_coeffs_y = qpsolvers.solve_qp(q_all, b_all, None, None, a_eq, b_eq, solver = 'quadprog')
+
+        a_eq, b_eq = self._construct_constraints(self.filter_line_coord[:,2], v0[0], 0, ve[0], 0, self.filter_line_coord[:,0])  
+        optimized_coeffs_x = qpsolvers.solve_qp(sparse.csr_matrix(q_all), b_all, None, None, sparse.csr_matrix(a_eq), b_eq, solver = 'clarabel')
+        
+        a_eq, b_eq = self._construct_constraints(self.filter_line_coord[:,2], v0[1], 0, ve[1], 0, self.filter_line_coord[:,1])
+        optimized_coeffs_y = qpsolvers.solve_qp(sparse.csr_matrix(q_all), b_all, None, None, sparse.csr_matrix(a_eq), b_eq, solver = 'clarabel')
 
         t2 = time.time()
         print("optimizing over! cost time = ", ((t2-t1)*1000))
         
-        # 获取最优解
+        # reshape
         optimized_coeffs_x = np.reshape(optimized_coeffs_x, (self.line_number, self.poly_n + 1)) 
         optimized_coeffs_y = np.reshape(optimized_coeffs_y, (self.line_number, self.poly_n + 1)) 
 

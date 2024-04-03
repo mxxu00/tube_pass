@@ -1,220 +1,176 @@
 import numpy as np
-from scipy.optimize import minimize
 import matplotlib.pyplot as plt
-import math
 import globalvar as gv
+import common_compute as cc
+import time
+import qpsolvers
+from scipy import sparse
 import pickle
 
+class TubeGen():
+    def __init__(self, ts_mindis, route_l, route_r, mindis_l, mindis_r):
+        self.poly_n = gv.tubegen_poly_n
+        self.ts = ts_mindis
+        self.line_number = len(self.ts) - 1
+        self.route_l = route_l
+        self.route_r = route_r
+        self.mindis_l = mindis_l
+        self.mindis_r = mindis_r
 
-# 定义目标函数
-def objective_function(coeffs):
-    # 将系数重新整形为形状为(line_number, poly_n+1)的矩阵
-    coeffs_matrix = np.reshape(coeffs, (line_number * 2, poly_n + 1))
+    def _construct_eq_constraints(self, ts, v0, a0, ve, ae, waypts):
 
-    # 初始化目标函数值
-    objective = 0
+        n_coef = self.poly_n + 1
 
-    # 遍历线段
-    for i in range(line_number):
-        j = i * 2
-        # 获取线段的起点和终点
-        t_start = filter_line_coord[i][2]
-        t_end = filter_line_coord[i+1][2]
-        length = (t_end - t_start)/100
-        # 计算多项式二阶导数的模的平方 θ=0
-        for t in np.linspace(t_start, t_end, 100):
-            derivative2_x = np.polyval(np.polyder(coeffs_matrix[j], 2), t)
-            derivative2_y = np.polyval(np.polyder(coeffs_matrix[j+1], 2), t)
-            derivative1_x = np.polyval(np.polyder(coeffs_matrix[j], 1), t)
-            derivative1_y = np.polyval(np.polyder(coeffs_matrix[j+1], 1), t)
-            objective += ((derivative2_x ** 2 + derivative2_y ** 2) * np.sqrt(derivative1_x ** 2 + derivative1_y ** 2)) * length
-            # 因为x和y没有关联性 所以曲线对t的导数就是x对t和y对t的导数的平方和
+        p0 = waypts[0]  # 初始位置
+        pe = waypts[-1]  # 终点位置
+
+        Aeq = np.zeros((2*self.line_number + 2, n_coef*self.line_number))
+        beq = np.zeros((2*self.line_number + 2))
+
+        neq = 0
+        # 起始/终止位置、速度、加速度约束 (4 个方程)
+        Aeq[0:2, 0:n_coef] = [cc.calc_tvec(ts[0], self.poly_n, 0),
+                            cc.calc_tvec(ts[0], self.poly_n, 1)]
+        Aeq[2:4, n_coef*(self.line_number-1):n_coef*self.line_number] = [cc.calc_tvec(ts[-1], self.poly_n, 0),
+                                                    cc.calc_tvec(ts[-1], self.poly_n, 1)]
+        beq[0:4] = [1/p0, v0, 1/pe, ve]
+
+        neq = 3
+        # 连续性约束 ((self.line_number - 1)*2 个方程)
+        for i in range(self.line_number - 1):
+            tvec_p = cc.calc_tvec(ts[i + 1], self.poly_n, 0)
+            tvec_v = cc.calc_tvec(ts[i + 1], self.poly_n, 1)
             
-        # 计算多项式二阶导数的模的平方 θ=pi
-        for t in np.linspace(t_start, t_end, 100):
-            derivative2_x = np.polyval(np.polyder(coeffs_matrix[j], 2), t)
-            derivative2_y = np.polyval(np.polyder(coeffs_matrix[j+1], 2), t)
-            derivative1_x = np.polyval(np.polyder(coeffs_matrix[j], 1), t)
-            derivative1_y = np.polyval(np.polyder(coeffs_matrix[j+1], 1), t)
-            objective += ((derivative2_x ** 2 + derivative2_y ** 2) * np.sqrt(derivative1_x ** 2 + derivative1_y ** 2)) * length
-            # 因为x和y没有关联性 所以曲线对t的导数就是x对t和y对t的导数的平方和
+            Aeq[neq, n_coef*(i):n_coef*(i + 2)] = np.concatenate((tvec_p, -tvec_p))
+            beq[neq] = 0
+            neq += 1
+            Aeq[neq, n_coef*(i):n_coef*(i + 2)] = np.concatenate((tvec_v, -tvec_v))
+            beq[neq] = 0
+            neq += 1
+
+        return Aeq, beq
+
+    def _construct_ieq_constraints(self, ts, waypts, mindis_k):
+
+        n_coef = self.poly_n + 1
+        Aieq = np.zeros((2 * self.line_number, n_coef * self.line_number))
+        bieq = np.zeros(2 * self.line_number)
+        neq = 0
+
+        for i in range(self.line_number):
+            # 曲率约束
+            coeff_vec = cc.calc_tvec(ts[i + 1], self.poly_n, 0)
+            Aieq[neq, n_coef * i:n_coef * (i + 1)] = coeff_vec
+            bieq[neq] = 1 / waypts[i]
+            neq += 1
             
-    return objective 
+            # 半径长度
+            coeff_vec = cc.calc_tvec(mindis_k[i, 2], self.poly_n, 0)
+            Aieq[neq, n_coef*(i):n_coef*(i + 1)] = coeff_vec
+            bieq[neq] = 1 / mindis_k[i, 1]
+            neq += 1
 
-# 定义约束条件函数
-def equality_constraint(coeffs):
-    # 四个参数分别对应：θ的0和pi、线段数量、x和y、多项式阶数
-    coeffs_matrix = np.reshape(coeffs, (2, line_number, 2, (poly_n + 1) * 2)) # 
-    # 初始化用于存储约束条件值的列表
-    constraints = []
-    # 等式约束1：0到3阶导相等
-    for i in range(1, line_number):
-        # 获取相邻线段的连接点t值
-        j = i * 2 - 2 # 1 <-> 0123   2 <-> 2345
-        t = filter_line_coord[i][2]
+        Aieq = -Aieq
+        bieq = -bieq     
 
-        # 计算多项式在连接点的0到3阶导数值
-        for k in range(3):
-            line1_x = np.polyval(np.polyder(coeffs_matrix[j], k), t)
-            line2_x = np.polyval(np.polyder(coeffs_matrix[j+2], k), t)
-            line1_y = np.polyval(np.polyder(coeffs_matrix[j+1], k), t)
-            line2_y = np.polyval(np.polyder(coeffs_matrix[j+3], k), t)
-            # print(derivative1,derivative2,derivative1-derivative2)
-            # 添加约束条件，确保连接点的0到3阶导数相等
-            # print(derivative1_x,derivative1_y,derivative2_x,derivative2_y)
-            constraints.append(line1_x - line2_x)
-            constraints.append(line1_y - line2_y)
-
-    # print(constraints)
-    return np.array(constraints) # 将约束条件作为numpy数组返回
-
-def inequality_constraint(coeffs):
-    coeffs_matrix = np.reshape(coeffs, (line_number * 2, (poly_n + 1) * 2))
-    # 不等式约束1：收缩率
-    # 不等式约束2：简单连接
-    # 不等式约束3：regular tube
-    # 不等式约束4：障碍物距离控制
-
-def start(coeffs, coord):
+        return Aieq, bieq
     
-    global line_number, poly_n, filter_line_coord
-    poly_n = gv.smooth_poly_n
+    def start(self):
+        
+        q_all_d1 = cc.compute_qall(self.poly_n, self.line_number, 1, self.ts) # 1 阶导
+        q_all_d0 = cc.compute_qall(self.poly_n, self.line_number, 0, self.ts) # 0 阶导
+        b_all = np.zeros(self.line_number * (self.poly_n + 1))
 
-    # 定义约束条件
-    equality_constraints = {'type': 'eq', 'fun': equality_constraint}
-    inequality_constraints = {'type': 'ineq', 'fun': inequality_constraint}
-    constraints = [equality_constraints, inequality_constraints]
+        w1 = 1
+        w2 = 0.01 # 加入这个系数 可以让管道更连续？？
+        w1 = w1 / (w1 + w2)
+        w2 = w2 / (w1 + w2)
 
-    # 案例输入
-    initial_coord = np.array(coord)
+        t1 = time.time()
+        # 进行优化        
+        
+        a_eq, b_eq = self._construct_eq_constraints(self.ts, 0, 0, 0, 0, self.route_l)
+        a_ieq, b_ieq = self._construct_ieq_constraints(self.ts, self.route_l, self.mindis_l)
+        optimized_coeffs_l = qpsolvers.solve_qp(sparse.csr_matrix(q_all_d1 * w1 + q_all_d0 * w2), b_all,
+                                                sparse.csr_matrix(a_ieq), b_ieq,
+                                                sparse.csr_matrix(a_eq), b_eq, solver = 'clarabel')
+        
+        a_eq, b_eq = self._construct_eq_constraints(self.ts, 0, 0, 0, 0, self.route_r)
+        a_ieq, b_ieq = self._construct_ieq_constraints(self.ts, self.route_r, self.mindis_r)
+        optimized_coeffs_r = qpsolvers.solve_qp(sparse.csr_matrix(q_all_d1 * w1 + q_all_d0 * w2), b_all,
+                                                sparse.csr_matrix(a_ieq), b_ieq,
+                                                sparse.csr_matrix(a_eq), b_eq, solver = 'clarabel')
+        
+        # a_eq, b_eq = self._construct_eq_constraints(self.ts, 0, 0, 0, 0, self.route_l)
+        # a_ieq, b_ieq = self._construct_ieq_constraints(self.ts, self.route_l, self.mindis_l)
+        # optimized_coeffs_l = qpsolvers.solve_qp((q_all_d1 * w1 + q_all_d0 * w2), b_all,
+        #                                         a_ieq, b_ieq,
+        #                                         a_eq, b_eq, solver = 'osqp')
+        
+        # a_eq, b_eq = self._construct_eq_constraints(self.ts, 0, 0, 0, 0, self.route_r)
+        # a_ieq, b_ieq = self._construct_ieq_constraints(self.ts, self.route_r, self.mindis_r)
+        # optimized_coeffs_r = qpsolvers.solve_qp((q_all_d1 * w1 + q_all_d0 * w2), b_all,
+        #                                         a_ieq, b_ieq,
+        #                                         a_eq, b_eq, solver = 'osqp')
 
-    initial_coeffs = 0
+        t2 = time.time()
+        print("radius optimized over! cost time = ", ((t2-t1)*1000))
+        
+        # 获取最优解
+        optimized_coeffs_l = np.reshape(optimized_coeffs_l, (self.line_number, self.poly_n + 1)) 
+        optimized_coeffs_r = np.reshape(optimized_coeffs_r, (self.line_number, self.poly_n + 1)) 
 
-    # 进行优化
-    result = minimize(objective_function, initial_coeffs, constraints=constraints)
-    print(result)
-
-    # 获取最优解
-    optimized_coeffs = result.x
-    print(optimized_coeffs)
-
-    # 绘制最优曲线 
-    # plt.plot(initial_coord[:, 0], initial_coord[:, 1], label='Initial',color='orange')
-    # plot_curve(optimized_coeffs, filter_line_coord)
-
-    return optimized_coeffs
-
-
-def find_lambda_min(obstacle, coeffs_gamma, coord):
-    coeffs_matrix = np.reshape(coeffs_gamma, (line_number * 2, poly_n + 1))
-    lambda_min_set = []
-    for i in obstacle:
-        lambda_temp = gv.lambda_max
-        t_temp = 0
-        findout_flag = 0
-        for j in range(line_number):
-            t_start = coord[j][2]
-            t_end = coord[j+1][2]
-            # 计算多项式二阶导数的模的平方
-            for t in np.linspace(t_start, t_end, 100):
-                x_value = np.polyval(np.polyder(coeffs_matrix[j], 2), t)
-                y_value = np.polyval(np.polyder(coeffs_matrix[j+1], 2), t)
-
-                distance = np.sqrt((x_value - i.x)**2 + (y_value - i.y)**2) - i.r 
-                if(distance < lambda_temp):
-                    lambda_temp = distance
-                    t_temp = t
-                    findout_flag = 1
-        if(findout_flag == 1):
-            lambda_min_set.append([t_temp, lambda_temp])
-    
-    return lambda_min_set
-       
-def get_derivative(coeffs, order):
-    coeffs_matrix = np.reshape(coeffs, (line_number * 2, poly_n+1))
-    derivative = []
-    for i in range(line_number * 2):
-        derivative.append(np.polyder(coeffs_matrix[i], order))
-    return derivative    
-
-def tube_gen(coeffs, coord, derivative, radius):
-    coeffs_matrix = np.reshape(coeffs, (line_number * 2, poly_n+1))
-    derivative_matrix = np.reshape(derivative, (line_number * 2, poly_n))
-    tube = np.zeros((line_number, gv.sim_step_length, 2, 2)) # 分别对应 点的位置、θ=0 or pi、x和y值
-    for i in range(line_number):
-        j = i * 2
-        t_start = coord[i][2]
-        t_end = coord[i+1][2]
-        for t,k in zip(np.linspace(t_start, t_end, gv.sim_step_length), range(gv.sim_step_length)):
-            
-            x_value = np.polyval(coeffs_matrix[j], t)
-            y_value = np.polyval(coeffs_matrix[j+1], t)
-            
-            derivative_x = np.polyval(derivative_matrix[j],t)
-            derivative_y = np.polyval(derivative_matrix[j+1],t)
-
-            derivative_x_1 = derivative_x / np.sqrt(derivative_x ** 2 + derivative_y ** 2)
-            derivative_y_1 = derivative_y / np.sqrt(derivative_x ** 2 + derivative_y ** 2)
-
-            normal_x = - derivative_y_1
-            normal_y = derivative_x_1
-
-            # tube[i][k][0][0] = x_value + radius
-            # tube[i][k][0][1] = y_value - radius
-            # tube[i][k][1][0] = x_value - radius
-            # tube[i][k][1][1] = y_value + radius
-
-            tube[i][k][0][0] = x_value + normal_x * radius
-            tube[i][k][0][1] = y_value + normal_y * radius
-            tube[i][k][1][0] = x_value - normal_x * radius + 2.5
-            tube[i][k][1][1] = y_value - normal_y * radius - 1
- 
-    return tube
-
-# def getns():
-# def getbs(): 暂时不需要 升级三维后添加
+        return optimized_coeffs_l, optimized_coeffs_r
 
 def main():
-    global line_number, poly_n
-    
-    # 调试参数
-    gv.smooth_poly_n = 5
-    poly_n = gv.tubegen_poly_n = 5
-    gv.lambda_max = 3
-    
-    # 暂存数据读取
-    f = open('savedata.pkl', 'rb')
-    savedata = pickle.load(f)
-    myobstacle = savedata['obstacle']
-    mycoeffs_gamma = savedata['pathcoeffs']
-    mycoord = savedata['pathpoint']
-    line_number = len(mycoord) - 1
-    
-    # lambda_min_set = find_lambda_min(myobstacle, mycoeffs_gamma, mycoord)
-    # print(lambda_min_set)
-    derivative_set = get_derivative(mycoeffs_gamma, 1)
-    tube_set = tube_gen(mycoeffs_gamma, mycoord, derivative_set, 1)
+    # 测试数据
+    f = open('tube_test_data_5.pkl', 'rb')
+    save_data = pickle.load(f)
+    axes, ts_mindis, tsk_mindis, route_l, route_r, mindis_l, mindis_r, fx, fx1, fx2, fy, fy1, fy2, ft = save_data
 
-    
-    # 画图调试
-    coeffs = np.reshape(mycoeffs_gamma, (line_number * 2, gv.smooth_poly_n + 1))
-    coord = np.array(mycoord)
-    for i in range(line_number):
-        j = i * 2
-        t = np.linspace(coord[i][2], coord[i+1][2], 100)
-        x = np.polyval(coeffs[j], t)
-        y = np.polyval(coeffs[j+1], t) 
-        # print(x,y)
-        plt.scatter(tube_set[i,:,0,1],gv.width - tube_set[i,:,0,0], s = 0.2)
-        plt.scatter(tube_set[i,:,1,1],gv.width - tube_set[i,:,1,0], s = 0.2)
-        plt.plot(y, gv.width - x, color = 'green', linewidth = 0.5)
+    # 半径生成
+    tg = TubeGen(ts_mindis, route_l, route_r, mindis_l, mindis_r)
+    coeffs_l, coeffs_r = tg.start()
 
-    plt.axis('equal')
+    fr1 = fr2 = np.empty([0])
+    # 点集生成
+    for k in range(len(coeffs_l)):
+        coeffs_l1 = coeffs_l[k]
+        coeffs_r1 = coeffs_r[k]
+        tt = ft[tsk_mindis[k]:tsk_mindis[k + 1]]
+        rr1 = np.polyval(coeffs_l1[::-1], tt)
+        fr1 = np.concatenate((fr1, rr1))
+        rr2 = np.polyval(coeffs_r1[::-1], tt)
+        fr2 = np.concatenate((fr2, rr2))
+
+    tt = ft[tsk_mindis[k + 1]]
+    fr1 = np.append(fr1, np.polyval(coeffs_l1[::-1], tt))
+    fr2 = np.append(fr2, np.polyval(coeffs_r1[::-1], tt))
+
+    tangent = np.array([fx1, fy1])
+    rot = np.array([[0, -1], [1, 0]])
+    normal = rot @ tangent
+    normal = normal / np.sqrt(np.sum(normal ** 2, axis=0))
+
+
+    fo1 = np.array([fx, fy]) - 1 / fr1 * normal
+    fo2 = np.array([fx, fy]) + 1 / fr2 * normal
+
+    # 画图
+
+    axes.plot(fo1[0], fo1[1], color = 'black', linewidth=2)
+    axes.plot(fo2[0], fo2[1], color = 'black', linewidth=2)
+    axes.plot(fx, fy, color = 'green', linewidth = 1.5)
+
+    fig2, ax = plt.subplots()
+    
+    ax.plot(1 / fr1)
+    ax.plot(- 1 / fr2)
+    ax.plot(ft, label = 'ft')
+
     plt.show()
 
-    f2 = open('tubedata.pkl','wb')
-    pickle.dump(tube_set,f2)
-    # start(mycoeffs, mypathpoint)
+    a = 1
 
 if __name__ == '__main__':
     main()

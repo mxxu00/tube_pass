@@ -1,15 +1,22 @@
 import numpy as np
 import globalvar as gv
 
-class rearranget:
-    def start(self, coeffs_x, coeffs_y, occup_map, ts, axes):
+class RearrangeT:
+    def __init__(self, coeffs_x, coeffs_y, occup_map, ts, axes):
+        self.coeffs_x = coeffs_x
+        self.coeffs_y = coeffs_y
+        self.occup_map = occup_map
+        self.ts = ts
+        self.axes = axes
+
+    def get_f(self):
         # step 1
-        line_number = int(np.size(coeffs_x) / (gv.smooth_poly_n + 1))
+        line_number = int(np.size(self.coeffs_x) / (gv.smooth_poly_n + 1))
         self.fx = self.fx1 = self.fx2 = self.fy = self.fy1 = self.fy2 = self.ft = np.empty([0])
         for i in range(line_number):
-            tt = np.arange(ts[i], ts[i + 1], gv.sim_step_length)
-            coeffs_x_t = coeffs_x[i]
-            coeffs_y_t = coeffs_y[i]
+            tt = np.arange(self.ts[i], self.ts[i + 1], gv.sim_step_length)
+            coeffs_x_t = self.coeffs_x[i] * gv.astarmap_scale
+            coeffs_y_t = self.coeffs_y[i] * gv.astarmap_scale
 
             xx = np.polyval(coeffs_x_t[::-1], tt)
             xx1 = np.polyval(np.polyder(coeffs_x_t[::-1], 1), tt)
@@ -26,8 +33,10 @@ class rearranget:
             self.fy2 = np.concatenate((self.fy2, yy2))
             self.ft = np.concatenate((self.ft, tt))
 
-        # step2
+        return self.fx, self.fx1, self.fx2, self.fy, self.fy1, self.fy2, self.ft
 
+    def get_mindis(self):
+        # step2
         rot = np.array([[0, -1], [1, 0]])
         ff = np.array([self.fx, self.fy])
         ff1 = np.array([self.fx1, self.fy1])
@@ -48,7 +57,7 @@ class rearranget:
                 ts_k.append(k)
         ts_k.append(k)  # 记录转折点处下标
 
-        self.ts_k1 = []  # 记录曲率最大处下标
+        ts_k1 = []  # 记录曲率最大处下标
         route_r = []  # 记录曲率最大处曲率大小
         route_l = []  # 记录曲率最大处曲率大小
         ts = []
@@ -61,7 +70,7 @@ class rearranget:
                 if tmp > curvature:
                     curvature = tmp
                     tmp_k1 = k1
-            self.ts_k1.append(tmp_k1)  # 记录该点下标
+            ts_k1.append(tmp_k1)  # 记录该点下标
             ts.append(self.ft[tmp_k1])  # 记录该点t值
             if flag_dir[tmp_k1] > 0:  # 判断是朝左还是朝右的
                 route_r.append(curvature)
@@ -71,27 +80,27 @@ class rearranget:
                 route_r.append(1 / gv.tube_r_max)
 
         # 处理一下开头结尾
-        if self.ts_k1[0] > 1:
-            self.ts_k1 = [1] + self.ts_k1
+        if ts_k1[0] > 0:
+            ts_k1 = [0] + ts_k1
             ts = [0] + ts
             route_r = [1 / gv.tube_r_max] + route_r
             route_l = [1 / gv.tube_r_max] + route_l
-        if self.ts_k1[-1] < len(flag_dir):
-            self.ts_k1.append(len(flag_dir) - 1)
+        if ts_k1[-1] < len(flag_dir):
+            ts_k1.append(len(flag_dir) - 1)
             ts.append(self.ft[len(flag_dir) - 1])
             route_l.append(1 / gv.tube_r_max)
             route_r.append(1 / gv.tube_r_max)
 
-        # 最后拿到四个数据 self.ts_k1 下标  ts 此处t值 route_l route_r 代表了左右的曲率
+        # 最后拿到四个数据 ts_k1 下标  ts 此处t值 route_l route_r 代表了左右的曲率
 
         # 查询与管道冲突的障碍物
-        mindis_k = np.zeros((len(self.ts_k1) - 1, 3))
-        for k in range(len(self.ts_k1) - 1):  # 遍历所有段 先弄 右边 r
+        mindis_k = np.zeros((len(ts_k1) - 1, 3))
+        for k in range(len(ts_k1) - 1):  # 遍历所有段 先弄 右边 r
             mindis = gv.tube_r_max
-            mindis_k[k, 0] = self.ts_k1[k]
+            mindis_k[k, 0] = ts_k1[k]
             mindis_k[k, 1] = gv.tube_r_max
-            mindis_k[k, 2] = self.ft[self.ts_k1[k]]
-            for k1 in range(self.ts_k1[k], self.ts_k1[k + 1]):
+            mindis_k[k, 2] = self.ft[ts_k1[k]]
+            for k1 in range(ts_k1[k], ts_k1[k + 1]):
                 xp = ff[0, k1]
                 yp = ff[1, k1]
                 bili = n_o[1, k1] / n_o[0, k1]
@@ -104,7 +113,7 @@ class rearranget:
                     bw_x = int(k2 * np.cos(theta) + xp)
                     bw_y = int(k2 * np.sin(theta) + yp)
                     if (bw_x >= 0 and bw_y >=0 and bw_x < gv.length and bw_y < gv.width):
-                        if occup_map[bw_x, bw_y] == 1:  # bw1是 障碍的集合
+                        if self.occup_map[bw_x, bw_y] == 1:  # bw1是 障碍的集合
                             break
                 mindis_tmp = k2
                 if mindis_tmp < mindis:
@@ -121,18 +130,18 @@ class rearranget:
                 end_x = ff[0, tmp_k1] + tmp_dis * n_o[0, tmp_k1] / np.linalg.norm(n_o[:, tmp_k1])
                 start_y = ff[1, tmp_k1]
                 end_y = ff[1, tmp_k1] + tmp_dis * n_o[1, tmp_k1] / np.linalg.norm(n_o[:, tmp_k1])
-                axes.plot([start_x, end_x], [start_y, end_y], '--r')
+                self.axes.plot([start_x, end_x], [start_y, end_y], '--r')
 
-        self.mindis_r = mindis_k
+        mindis_r = mindis_k
 
         n_o = -n_o
-        mindis_k = np.zeros((len(self.ts_k1) - 1, 3))
-        for k in range(len(self.ts_k1) - 1):  # 遍历所有段
+        mindis_k = np.zeros((len(ts_k1) - 1, 3))
+        for k in range(len(ts_k1) - 1):  # 遍历所有段
             mindis = gv.tube_r_max
+            mindis_k[k, 0] = ts_k1[k]
             mindis_k[k, 1] = gv.tube_r_max
-            mindis_k[k, 0] = self.ts_k1[k]
-            mindis_k[k, 2] = self.ft[self.ts_k1[k]]
-            for k1 in range(self.ts_k1[k], self.ts_k1[k + 1]):
+            mindis_k[k, 2] = self.ft[ts_k1[k]]
+            for k1 in range(ts_k1[k], ts_k1[k + 1]):
                 xp = ff[0, k1]
                 yp = ff[1, k1]
                 bili = n_o[1, k1] / n_o[0, k1]
@@ -145,7 +154,7 @@ class rearranget:
                     bw_x = int(k2 * np.cos(theta) + xp)
                     bw_y = int(k2 * np.sin(theta) + yp)
                     if (bw_x >= 0 and bw_y >=0 and bw_x < gv.length and bw_y < gv.width):
-                        if occup_map[bw_x, bw_y] == 1:
+                        if self.occup_map[bw_x, bw_y] == 1:
                             break
                 mindis_tmp = k2
                 if mindis_tmp < mindis:
@@ -161,10 +170,13 @@ class rearranget:
                 end_x = ff[0, tmp_k1] + tmp_dis * n_o[0, tmp_k1] / np.linalg.norm(n_o[:, tmp_k1])
                 start_y = ff[1, tmp_k1]
                 end_y = ff[1, tmp_k1] + tmp_dis * n_o[1, tmp_k1] / np.linalg.norm(n_o[:, tmp_k1])
-                axes.plot([start_x, end_x], [start_y, end_y], '--r')
+                self.axes.plot([start_x, end_x], [start_y, end_y], '--r')
 
-        self.mindis_l = mindis_k
+        mindis_l = mindis_k
 
-        self.route_l_out = 1 / np.array(route_l)
-        self.route_r_out = 1 / np.array(route_r)
-        self.ts_out = np.array(ts)
+        route_l_out = 1 / np.array(route_l)
+        route_r_out = 1 / np.array(route_r)
+        ts_mindis = np.array(ts)
+        tsk_mindis = ts_k1
+
+        return ts_mindis, tsk_mindis, route_l_out, route_r_out, mindis_l, mindis_r
