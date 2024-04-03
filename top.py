@@ -20,7 +20,7 @@ gv.length_start = 2 * gv.obstacle_radius[1]
 gv.length = 10 * 100 + 2 * gv.length_start
 gv.width = 8 * 100
 gv.smooth_poly_n = 5
-gv.tubegen_poly_n = 6
+gv.tubegen_poly_n = 5
 gv.lambda_max = 0
 gv.sim_step_length = 0.01
 gv.tube_r_max = 80
@@ -67,9 +67,9 @@ fx, fx1, fx2, fy, fy1, fy2, ft = re.get_f()
 ts_mindis, tsk_mindis, route_l, route_r, mindis_l, mindis_r = re.get_mindis()
 axes.scatter(fx[tsk_mindis], fy[tsk_mindis], marker = "*", color = 'purple')
 
-save_data = [axes, ts_mindis, tsk_mindis, route_l, route_r, mindis_l, mindis_r, fx, fx1, fx2, fy, fy1, fy2, ft]
-f = open('tube_test_data_5.pkl', 'wb')
-pickle.dump(save_data, f)
+# save_data = [axes, ts_mindis, tsk_mindis, route_l, route_r, mindis_l, mindis_r, fx, fx1, fx2, fy, fy1, fy2, ft]
+# f = open('tube_test_data_5.pkl', 'wb')
+# pickle.dump(save_data, f)
 
 # 半径生成
 tg = tubegen.TubeGen(ts_mindis, route_l, route_r, mindis_l, mindis_r)

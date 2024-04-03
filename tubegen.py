@@ -35,7 +35,7 @@ class TubeGen():
                                                     cc.calc_tvec(ts[-1], self.poly_n, 1)]
         beq[0:4] = [1/p0, v0, 1/pe, ve]
 
-        neq = 3
+        neq = 4
         # 连续性约束 ((self.line_number - 1)*2 个方程)
         for i in range(self.line_number - 1):
             tvec_p = cc.calc_tvec(ts[i + 1], self.poly_n, 0)
@@ -61,7 +61,7 @@ class TubeGen():
             # 曲率约束
             coeff_vec = cc.calc_tvec(ts[i + 1], self.poly_n, 0)
             Aieq[neq, n_coef * i:n_coef * (i + 1)] = coeff_vec
-            bieq[neq] = 1 / waypts[i]
+            bieq[neq] = 1 / waypts[i + 1]
             neq += 1
             
             # 半径长度
