@@ -82,7 +82,7 @@ class TubeGen():
         b_all = np.zeros(self.line_number * (self.poly_n + 1))
 
         w1 = 1
-        w2 = 0.01 # 加入这个系数 可以让管道更连续？？
+        w2 = 0.01 # 加入这个系数 可以让管道更连续
         w1 = w1 / (w1 + w2)
         w2 = w2 / (w1 + w2)
 
@@ -124,7 +124,7 @@ class TubeGen():
 
 def main():
     # 测试数据
-    f = open('tube_test_data_5.pkl', 'rb')
+    f = open('tube_test_data_3.pkl', 'rb')
     save_data = pickle.load(f)
     axes, ts_mindis, tsk_mindis, route_l, route_r, mindis_l, mindis_r, fx, fx1, fx2, fy, fy1, fy2, ft = save_data
 
@@ -154,7 +154,7 @@ def main():
 
 
     fo1 = np.array([fx, fy]) - 1 / fr1 * normal
-    fo2 = np.array([fx, fy]) + 1 / fr2 * normal
+    fo2 = np.array([fx, fy]) + 1 / fr2 * normal 
 
     # 画图
 
@@ -162,11 +162,10 @@ def main():
     axes.plot(fo2[0], fo2[1], color = 'black', linewidth=2)
     axes.plot(fx, fy, color = 'green', linewidth = 1.5)
 
-    fig2, ax = plt.subplots()
+    # fig2, ax = plt.subplots()
     
-    ax.plot(1 / fr1)
-    ax.plot(- 1 / fr2)
-    ax.plot(ft, label = 'ft')
+    # ax.plot(1 / fr1)
+    # ax.plot(- 1 / fr2)
 
     plt.show()
 

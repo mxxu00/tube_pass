@@ -17,7 +17,7 @@ def init(axes):
     # 障碍物生成
     myobstacle = []
     for i in range(gv.obstacle_number):
-        myobstacle.append(Obstacle(random.random() * gv.width + gv.length_start,
+        myobstacle.append(Obstacle(random.random() * (gv.length - gv.length_start * 2) + gv.length_start,
                                     random.random() * (gv.width + 100 * 2) - 100,
                                     random.uniform(gv.obstacle_radius[0], gv.obstacle_radius[1])))
 

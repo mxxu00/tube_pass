@@ -4,16 +4,16 @@ import numpy as np
 import pickle
 
 class Boids:
-    def __init__(self, num, dt):
+    def __init__(self, num, dt, target_array, obstacle_set, scale_coeff):
         self.num = num  # agent
         self.d = 2
         # self.target_now = np.zeros((num, self.d))
         self.target_now = np.array([0,0])
         self.target_step = 0
-        self.target = np.array([[100,0],[100,100],[0,100],[0,0]])
+        self.target = target_array
         # self.target = np.array([[50,50]])
         # self.predators = np.random.random((Np, self.d*2)) 
-        # 前半部分是速度 后半部分是位置
+        # 前半部分是速度 后半部分是位置s
         self.agents_v = np.random.random((num, self.d))
         self.agents_c = np.random.random((num, self.d))
 
@@ -23,32 +23,27 @@ class Boids:
         # self.agents_v = np.zeros((num, self.d))
         # self.agents_c = np.zeros((num, self.d))
         self.dt = dt
+        self.scale_coeff = scale_coeff
 
-        self.radius_repulsion = 30
-        self.radius_obstacle = 10
-        self.radius_alignment = 10
+        self.radius_repulsion = 30 * self.scale_coeff
+        self.radius_obstacle = 10 * self.scale_coeff
+        self.radius_alignment = 10 * self.scale_coeff
 
-        self.v_target_max = 20
-        self.v_target = 10
-        self.v_alignment_max = 5
-        self.v_max = 20
+        self.v_target_max = 20  * self.scale_coeff
+        self.v_target = 10  * self.scale_coeff
+        self.v_max = 20  * self.scale_coeff
 
-        self.obstacle_set = None
+        self.obstacle_set = obstacle_set
 
-        self.obstacle_p = np.mat([[0,10],[12,0]])
+        self.obstacle_p = np.mat([[0,10],[15,0]]) 
 
-        self.repulsion_p = np.mat([[0,7],[10,0]])
+        self.repulsion_p = np.mat([[0,7],[10,0]]) * self.scale_coeff
 
-        self.closure_p = np.mat([[0,2],[15,0]])
+        self.closure_p = np.mat([[0,2],[15,0]]) * self.scale_coeff
 
-        self.tube_set = np.array([50,50])
-        self.point_number = int(np.size(self.tube_set)/2)
-
-    def reinit(self, num):
-        self.agents_v = np.random.random((num, self.d))
-        self.agents_c = np.random.random((num, self.d))
-        self.num = num
-        self.status = [None] * num
+    def init(self, scale):
+        self.agents_v = np.zeros((self.num, self.d))
+        self.agents_c = np.random.random((self.num, self.d)) * scale
 
     def transition(self,m,str):
         if(str == 'closure'):
@@ -63,7 +58,7 @@ class Boids:
         return result
 
     def _pairwise_distances(self, X, Y):  # 这里注意一下 X的长度决定最后计算出来的速度长度
-        # 一种隐式计算法 用于计算相对距离distance 返回标量
+        # 计算相对距离distance 返回标量
         D = -2 * X @ Y.T + np.sum(Y ** 2, axis=1) + np.sum(X ** 2, axis=1)[:, np.newaxis]
         # D[D < 0] = 0
         return np.sqrt(D)
@@ -77,40 +72,35 @@ class Boids:
                 
                 d_y = self.target[i,1] - self.target_now[1]
                 d = np.sqrt(d_x**2 + d_y**2)
-                print(d_x,d_y,d,self.dt,self.v_target)
+                # print(d_x,d_y,d,self.dt,self.v_target)
                 if(d > (self.dt * self.v_target)):
                     target_temp = [self.target_now[0] + (d_x/d * self.v_target * self.dt), self.target_now[1] + (d_y/d * self.v_target * self.dt)]
                     self.target_now = target_temp
                 else:
                     self.target_step +=1
                 
-                print(self.target_now)
+                # print(self.target_now)
     
     def _v_obstacle(self):
-        input_set = self.obstacle_set
-        point_number = int(np.size(input_set)/2)
-        tube_set = np.reshape(input_set,(point_number, 2))
-
-        d_ao_matrix = self._pairwise_distances(self.agents_c, tube_set)
-        
+        point_number = int(np.size(self.obstacle_set)/2)
+        point_set = np.reshape(self.obstacle_set, (point_number, 2))
+        d_ao_matrix = self._pairwise_distances(self.agents_c, point_set)
 
         # # 方式1
         # obstacle_flag_set = (d_ao_matrix < self.radius_obstacle).astype(int)
         # d_o_matrix = (1/d_ao_matrix) * obstacle_flag_set
 
         # 方式2
-        d_o_matrix = self.transition(d_ao_matrix,'obstacle') 
-        v_o_matrix = np.diag(np.sum(d_o_matrix, axis=1)) @ self.agents_c  - d_o_matrix @ tube_set
+        d_o_matrix = self.transition(d_ao_matrix, 'obstacle') 
+        v_o_matrix = np.diag(np.sum(d_o_matrix, axis=1)) @ self.agents_c  - d_o_matrix @ point_set
 
         # v_o_matrix = np.clip(v_o_matrix, -self.v_obstacle_max, +self.v_obstacle_max)
             
         return v_o_matrix
     
     def _velocity(self):
-        d_aa_matrix = self._pairwise_distances(self.agents_c, self.agents_c)
 
-        # 计算repulsion 
-        repulsion_flag_set = (d_aa_matrix < self.radius_repulsion).astype(int) # 布尔型的数组 并转换成int数组
+        d_aa_matrix = self._pairwise_distances(self.agents_c, self.agents_c)
 
         # # 方式1
         # d_r_matrix = (1/(d_aa_matrix+np.eye(self.num))) * repulsion_flag_set
@@ -137,13 +127,9 @@ class Boids:
         # 物理意义为其他所有速度之和 与 自己的速度 的向量差
         alignment_flag_set = (d_aa_matrix < self.radius_alignment).astype(int)
         v_a_matrix = alignment_flag_set @ self.agents_v - 2*self.agents_v
-        # v_a_matrix = np.clip(v_a_matrix, -self.v_alignment_max, +self.v_alignment_max)
 
         # 避障项
         v_o_matrix = self._v_obstacle()
-
-        # s = 100
-        # Ff = - np.diag(np.sqrt(np.sum(np.square(self.agents_v), axis=1))- s)/s @ self.agents_v
         
         v_total = v_r_matrix + v_target_matrix + v_o_matrix + v_a_matrix * 0.05
         # print(v_r_matrix[0],v_target_matrix[0],v_o_matrix[0])
@@ -153,10 +139,10 @@ class Boids:
         
     def evolve(self):
         self._target_update()
-        # v = 0.1 * self.agents_v + 0.9 * self.dt * self._velocity()
-        # self.agents_v = np.clip(v, -self.v_max, +self.v_max)
+        v = 0.1 * self.agents_v + 0.9 * self._velocity()
+        self.agents_v = np.clip(v, -self.v_max, +self.v_max)
 
-        self.agents_v = np.clip(self._velocity(), -self.v_max, +self.v_max)
+        # self.agents_v = np.clip(self._velocity(), -self.v_max, +self.v_max)
         self.agents_c_next = self.agents_c + self.dt*self.agents_v
 
         # self.agents_v = np.clip(self._velocity(), -self.v_max, +self.v_max)
@@ -194,16 +180,15 @@ class Boids:
 
 def main_2():       
     # f = open('tubedata.pkl','rb')
-    # point_set = np.array([[50,50]])
-    point_set = np.array([[50,1],[20,5],[70,-6],[100,49],[50,99],[0,49]])
+    # obstacle_set = np.array([[50,50]])
+    obstacle_set = np.array([[50,1],[20,5],[70,-6],[100,49],[50,99],[0,49]])
     num = 8
     d = 2
     step_set = np.zeros((num, 1000, d))
     velocity_set = np.zeros((num, 1000, d))
-    boids = Boids(num, 0.05)
-    boids.obstacle_set = point_set
-
-    # 迭代
+    target_array = np.array([[100,0],[100,100],[0,100],[0,0]])
+    boids = Boids(num, 0.05, target_array, obstacle_set, 1)
+    # 迭代s
     for t in range(1000):        
         boids.evolve()
         boids.agents_c = boids.agents_c_next
@@ -213,7 +198,7 @@ def main_2():
 
     # for t in range(1000):        
     #     boids.evolve()
-    #     step_set[:,t,:] = boids.agents_c5
+    #     step_set[:,t,:] = boids.agents_c
     #     velocity_set[:,t,:] = boids.agents_v
 
     fig, ax = plt.subplots(1,2,figsize = (16,8))
@@ -231,7 +216,7 @@ def main_2():
             ax[0].scatter(step_set[j,i,0],step_set[j,i,1])
             ax[0].set_title('t={:.2f}'.format(i * boids.dt))
             
-        ax[0].scatter(point_set[:,0],point_set[:,1],color='r',marker='x')
+        ax[0].scatter(obstacle_set[:,0],obstacle_set[:,1],color='r',marker='x')
         plt.pause(0.001)
 
 if __name__ == '__main__':
